@@ -1,5 +1,4 @@
 from moto import mock_aws
-from typing import Dict
 import boto3
 import cherrypy
 import json
@@ -7,6 +6,7 @@ import os
 import pytest
 import requests
 import sys
+import pyotp
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src import v1
@@ -32,6 +32,7 @@ def sonde_mock_aws(request):
         SecretString=json.dumps(
             {
                 "WindowApiPassword": request.cls.WindowApiPassword,
+                "OTPSecret": pyotp.random_base32(),
             }
         ),
     )
@@ -103,14 +104,27 @@ class Test_v1:
         resp = get("hello")
         assert "hello from the v1 feeder api" in resp.text
 
+    def test_get_window_image_without_auth(self):
+        get("get_window_image", expected_status=400)
+
+    def test_get_window_image_without_format_arg(self):
+        get(
+            "get_window_image",
+            headers={
+                "X-Feeder-Auth": self.WindowApiPassword,
+            },
+            expected_status=400,
+        )
+
     def test_get_window_image(self):
         resp = get(
             "get_window_image",
             headers={
                 "X-Feeder-Auth": self.WindowApiPassword,
             },
+            params={
+                'format': 'png',
+            }
         )
-        assert resp.text == "foo"
-
-    def test_get_window_image_without_auth(self):
-        get("get_window_image", expected_status=400)
+        with open("test-image.png", "wb") as f:
+            f.write(resp.content)

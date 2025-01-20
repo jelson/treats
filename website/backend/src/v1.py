@@ -8,14 +8,17 @@ import os
 import sys
 import time
 import json
-
-from boto3.dynamodb.conditions import Key, Attr
+import pyotp
+import qrcode
+from io import BytesIO
 
 sys.path.insert(0, os.path.dirname(__file__))
 import util
 
 DEFAULT_HOST = "https://sondesearch.lectrobox.com"
 DEV_HOST = "http://localhost:4000"
+AUTH_LANDING_PAGE = "/auth/"
+
 
 
 # A placeholder for expensive setup that should only be done once. This
@@ -52,11 +55,14 @@ class FeederAPI:
         self._g = global_config
         # self.tables = table_definitions.TableClients()
 
+    def origin(self):
+        return DEV_HOST if self._g.dev_mode else DEFAULT_HOST
+
     @staticmethod
     def allow_lectrobox_cors(func):
         def wrapper(*args, **kwargs):
             self = args[0]
-            origin = DEV_HOST if self._g.dev_mode else DEFAULT_HOST
+            origin = self.origin()
             cherrypy.response.headers["Access-Control-Allow-Origin"] = origin
             cherrypy.response.headers["Access-Control-Allow-Credentials"] = "true"
             return func(*args, **kwargs)
@@ -72,8 +78,20 @@ class FeederAPI:
                 raise ClientError("no user token in request cookies")
             return func(*args, **kwargs)
 
-
         return wrapper
+
+    def _required(self, args, arg):
+        if arg not in args:
+            raise ClientError(f"missing argument: {arg}")
+        if not args[arg]:
+            raise ClientError(f"empty argument: {arg}")
+
+        return args[arg]
+
+    def _get_otp(self):
+        totp = pyotp.TOTP(self._g.secrets["OTPSecret"])
+        totp.digits = 10
+        return totp
 
     @cherrypy.expose
     def hello(self):
@@ -85,16 +103,29 @@ class FeederAPI:
     @cherrypy.expose
     @allow_lectrobox_cors
     @window_auth_required
-    def get_window_image(self):
-        return "foo"
+    def get_window_image(self, **kwargs):
+        self._required(kwargs, "format")
+        totp = self._get_otp()
+        now = datetime.datetime.now()
+        otp = totp.at(now)
 
-    def _required(self, args, arg):
-        if arg not in args:
-            raise ClientError(f"missing argument: {arg}")
-        if not args[arg]:
-            raise ClientError(f"empty argument: {arg}")
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=3,
+            border=3,
+        )
+        qr.add_data(f"{self.origin()}{AUTH_LANDING_PAGE}{otp}")
+        qr.make(fit=True)
 
-        return args[arg]
+        img = qr.make_image(fill_color="black", back_color="white")
+
+        if kwargs["format"] == "png":
+            temp = BytesIO()
+            img.save(temp, format="png")
+            return temp.getvalue()
+
+        raise ClientError("unknown image format")
 
 
 global_config = None
