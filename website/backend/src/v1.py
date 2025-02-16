@@ -10,6 +10,7 @@ import time
 import json
 import pyotp
 import qrcode
+from PIL import Image, ImageFont, ImageDraw
 from io import BytesIO
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -18,7 +19,6 @@ import util
 DEFAULT_HOST = "https://sondesearch.lectrobox.com"
 DEV_HOST = "http://localhost:4000"
 AUTH_LANDING_PAGE = "/auth/"
-
 
 
 # A placeholder for expensive setup that should only be done once. This
@@ -54,6 +54,15 @@ class FeederAPI:
     def __init__(self, global_config: GlobalConfig):
         self._g = global_config
         # self.tables = table_definitions.TableClients()
+        self.window_image_size = {'x': 296, 'y': 128}
+        self.FONT = ImageFont.truetype(
+            os.path.join(os.path.dirname(__file__), "../data/vhs-gothic.16px.ttf"),
+            16
+        )
+        self.FONT = ImageFont.truetype(
+            os.path.join(os.path.dirname(__file__), "../data/VCR_OSD_MONO_1.21px.ttf"),
+            21
+        )
 
     def origin(self):
         return DEV_HOST if self._g.dev_mode else DEFAULT_HOST
@@ -109,6 +118,7 @@ class FeederAPI:
         now = datetime.datetime.now()
         otp = totp.at(now)
 
+        # Create QR code
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -118,7 +128,25 @@ class FeederAPI:
         qr.add_data(f"{self.origin()}{AUTH_LANDING_PAGE}{otp}")
         qr.make(fit=True)
 
-        img = qr.make_image(fill_color="black", back_color="white")
+        qr_img = qr.make_image(fill_color='black', back_color='white').copy()
+
+        # Create the display image and copy the QR image into it
+        img = Image.new(mode='1', color='white', size=(
+            self.window_image_size['x'],
+            self.window_image_size['y'],
+        ))
+        qr_y = int((self.window_image_size['y'] - qr_img.size[1]) / 2)
+        print(f"image is: {qr_img}, size {qr_img.size}")
+        img.paste(qr_img, (0, qr_y))
+
+        # Annotate with text
+        text_x = qr_img.size[0] + 30
+        draw = ImageDraw.Draw(img)
+        now = datetime.datetime.now()
+        date_text = now.strftime("%Y-%m-%d")
+        draw.text((text_x, 20), date_text, 'black', font=self.FONT)
+        date_text = now.strftime("%H:%M:%S")
+        draw.text((text_x, 40), date_text, 'black', font=self.FONT)
 
         if kwargs["format"] == "png":
             temp = BytesIO()

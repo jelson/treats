@@ -7,5 +7,9 @@
     "cSpell.ignoreWords": [
         "cherrypy",
         "lectrobox"
+    ],
+    "cSpell.words": [
+        "apiserver",
+        "totp"
     ]
 }
