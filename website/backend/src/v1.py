@@ -56,13 +56,10 @@ class FeederAPI:
         # self.tables = table_definitions.TableClients()
         self.window_image_size = {'x': 296, 'y': 128}
         self.FONT = ImageFont.truetype(
-            os.path.join(os.path.dirname(__file__), "../data/vhs-gothic.16px.ttf"),
-            16
-        )
-        self.FONT = ImageFont.truetype(
             os.path.join(os.path.dirname(__file__), "../data/VCR_OSD_MONO_1.21px.ttf"),
             21
         )
+        self.CODE_VALIDITY_SECONDS = 60*10
 
     def origin(self):
         return DEV_HOST if self._g.dev_mode else DEFAULT_HOST
@@ -89,6 +86,21 @@ class FeederAPI:
 
         return wrapper
 
+    @staticmethod
+    def website_auth_required(func):
+        def wrapper(*args, **kwargs):
+            if 'otp' not in cherrypy.request.cookie:
+                raise ClientError("need a QR code scan, friendo")
+
+            self = args[0]
+            totp = self._get_otp()
+            code = cherrypy.request.cookie['otp'].value
+            print(f"Verifying code: {code}")
+            if not totp.verify(code, valid_window=self.CODE_VALIDITY_SECONDS // totp.interval):
+                raise ClientError("need a recent QR code scan, friendo")
+
+        return wrapper
+
     def _required(self, args, arg):
         if arg not in args:
             raise ClientError(f"missing argument: {arg}")
@@ -109,14 +121,17 @@ class FeederAPI:
     def get_time(self):
         return Decimal(time.time())
 
+    def _get_auth_url(self, at=None):
+        totp = self._get_otp()
+        if at is None:
+            at = datetime.datetime.now()
+        otp = totp.at(at)
+        return f"{self.origin()}{AUTH_LANDING_PAGE}{otp}"
+
     @cherrypy.expose
-    @allow_lectrobox_cors
     @window_auth_required
     def get_window_image(self, **kwargs):
         self._required(kwargs, "format")
-        totp = self._get_otp()
-        now = datetime.datetime.now()
-        otp = totp.at(now)
 
         # Create QR code
         qr = qrcode.QRCode(
@@ -125,7 +140,7 @@ class FeederAPI:
             box_size=3,
             border=3,
         )
-        qr.add_data(f"{self.origin()}{AUTH_LANDING_PAGE}{otp}")
+        qr.add_data(self._get_auth_url())
         qr.make(fit=True)
 
         qr_img = qr.make_image(fill_color='black', back_color='white').copy()
@@ -161,12 +176,17 @@ class FeederAPI:
 
         raise ClientError("unknown image format")
 
+    @cherrypy.expose
+    @website_auth_required
+    def verify_scan(self, **kwargs):
+        return 'authorized!'
+
 
 global_config = None
 
 
 # This is called both by the uwsgi path, via application(), and the unit test
-def mount_server_instance(dev_mode: bool):
+def mount_server_instance(dev_mode: bool) -> FeederAPI:
     global global_config
     if not global_config:
         global_config = GlobalConfig(dev_mode=dev_mode)

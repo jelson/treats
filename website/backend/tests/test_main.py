@@ -1,9 +1,11 @@
 from moto import mock_aws
 import boto3
 import cherrypy
+import datetime
 import json
 import os
 import pytest
+import re
 import requests
 import sys
 import pyotp
@@ -128,3 +130,37 @@ class Test_v1:
         )
         with open("test-image.png", "wb") as f:
             f.write(resp.content)
+
+    def test_valid_otp(self):
+        url = self.apiserver._get_auth_url()
+        code = re.search(r'auth/(\d+)', url).group(1)
+        get(
+            "verify_scan",
+            cookies={
+                'otp': code,
+            }
+        )
+
+    def test_slightly_old_otp(self):
+        t = datetime.datetime.now() - datetime.timedelta(seconds=self.apiserver.CODE_VALIDITY_SECONDS)
+        url = self.apiserver._get_auth_url(at=t)
+        code = re.search(r'auth/(\d+)', url).group(1)
+        get(
+            "verify_scan",
+            cookies={
+                'otp': code,
+            }
+        )
+
+    def test_too_old_otp(self):
+        t = datetime.datetime.now() - datetime.timedelta(seconds=self.apiserver.CODE_VALIDITY_SECONDS + 60)
+        url = self.apiserver._get_auth_url(at=t)
+        code = re.search(r'auth/(\d+)', url).group(1)
+        resp = get(
+            "verify_scan",
+            cookies={
+                'otp': code,
+            },
+            expected_status=400,
+        )
+        assert 'need a recent QR code' in resp.text
