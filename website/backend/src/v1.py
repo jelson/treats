@@ -135,18 +135,24 @@ class FeederAPI:
             self.window_image_size['x'],
             self.window_image_size['y'],
         ))
+        qr_x = 5
         qr_y = int((self.window_image_size['y'] - qr_img.size[1]) / 2)
         print(f"image is: {qr_img}, size {qr_img.size}")
-        img.paste(qr_img, (0, qr_y))
+        img.paste(qr_img, (qr_x, qr_y))
 
         # Annotate with text
         text_x = qr_img.size[0] + 30
         draw = ImageDraw.Draw(img)
         now = datetime.datetime.now()
-        date_text = now.strftime("%Y-%m-%d")
-        draw.text((text_x, 20), date_text, 'black', font=self.FONT)
-        date_text = now.strftime("%H:%M:%S")
-        draw.text((text_x, 40), date_text, 'black', font=self.FONT)
+        lines = [
+            'Scan to feed',
+            'me a treat!',
+            '',
+            now.strftime("%Y-%m-%d"),
+            now.strftime("%H:%M:%S")
+        ]
+        for i, line in enumerate(lines):
+            draw.text((text_x, 10 + (20 * i)), line, 'black', font=self.FONT)
 
         if kwargs["format"] == "png":
             temp = BytesIO()
